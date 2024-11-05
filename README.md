@@ -19,11 +19,11 @@ torch-geometric
 ogb
 ```
 
-### Download Dataset
-Run `train.py` and the dataset will be downloaded automatically to `_data/`.
+### Description
+We provide examples for Meta-GCN (MAML-model) and GPN (non-MAML model), using different optimizers: Adam, SAM (`+SAM`), FGSAM (`+FGSAM`), FGSAM+ (`+FGSAMp`).
 
 ### Train model
-Run `train.py` to train model with default setting. 
+Run `train.py` to train with the default setting, and the datasets will be downloaded automatically into `_data/`.
 
 Or you can customize the hyper-parameters in `config.py`.
 
