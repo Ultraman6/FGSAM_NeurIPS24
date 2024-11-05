@@ -3,44 +3,6 @@ import torch
 class FGSAMp(torch.optim.Optimizer):
 
     def __init__(self, params, base_optimizer, k, alpha, rho=0.05, lam=0.5, num_pert=-1, topology_norm=False, **kwargs):
-
-        """
-        LookSAM algorithm: https://arxiv.org/pdf/2203.02714.pdf
-        Optimization algorithm that capable of simultaneously minimizing loss and loss sharpness to narrow
-        the generalization gap.
-
-        :param params: parameters of the model
-        :param base_optimizer: optimizer module (SGD, Adam, etc...)
-        :param k: frequency of SAM's gradient calculation (default: 10)
-        :param alpha: scaling factor for the adaptive ratio (default: 0.7)
-        :param rho: radius of the l_p ball (default: 0.1)
-
-        :return: None
-
-        Usage:
-            model = YourModel()
-            base_optimizer = YourBaseOptimizer
-            optimizer = LookSAM(params=model.parameters(), 
-                                base_optimizer=base_optimizer, 
-                                k=k, 
-                                alpha=alpha, 
-                                rho=rho, 
-                                **kwargs)
-            ...
-
-            def forward():
-                ...
-                return loss, acc
-                
-            for train_index, data in enumerate(loader):
-                loss, acc = forward()
-                loss.backward()
-                optimizer.step(t=train_index, forward, zero_grad=True)
-
-            ...
-
-        """
-
         defaults = dict(alpha=alpha, rho=rho, **kwargs)
         super(FGSAMp, self).__init__(params, defaults)
 
