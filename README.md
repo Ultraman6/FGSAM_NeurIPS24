@@ -1,4 +1,4 @@
-# FGSAM: Few-Shot Node Classification
+# FGSAM: Fast Graph Sharpness-Aware Minimization for Enhancing and Accelerating Few-Shot Node Classification
 
 Official implementation for NeurIPS 2024 paper "*Fast Graph Sharpness-Aware Minimization for Enhancing and Accelerating Few-Shot Node Classification*" [[arxiv]](https://arxiv.org/abs/2410.16845), by Yihong Luo*, Yuhan Chen*, Siya Qiu, Yiwei Wang, Chen Zhang, Yan Zhou, Xiaochun Cao, Jing Tang (* means equal contribtuion)
 
