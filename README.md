@@ -29,3 +29,16 @@ Or you can customize the hyper-parameters in `config.py`.
 
 ### Contact
 Please contact **Yuhan Chen** (draym@qq.com or draym28@gmail.com) or **Yihong Luo** (yluocg@connect.ust.hk) if you have any question about this code.
+
+### Citation
+If you find FGSAM useful in your work, you can cite the following paper:
+```
+@article{luo2024fast,
+  title={Fast Graph Sharpness-Aware Minimization for Enhancing and Accelerating Few-Shot Node Classification},
+  author={Luo, Yihong and Chen, Yuhan and Qiu, Siya and Wang, Yiwei and Zhang, Chen and Zhou, Yan and Cao, Xiaochun and Tang, Jing},
+  journal={Advances in Neural Information Processing Systems},
+  volume={37},
+  pages={132364--132387},
+  year={2024}
+}
+```
