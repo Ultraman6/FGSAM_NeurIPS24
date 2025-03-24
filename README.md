@@ -33,12 +33,12 @@ Please contact **Yuhan Chen** (draym@qq.com or draym28@gmail.com) or **Yihong Lu
 ### Citation
 If you find FGSAM useful in your work, you can cite the following paper:
 ```
-@article{luo2024fast,
-  title={Fast Graph Sharpness-Aware Minimization for Enhancing and Accelerating Few-Shot Node Classification},
-  author={Luo, Yihong and Chen, Yuhan and Qiu, Siya and Wang, Yiwei and Zhang, Chen and Zhou, Yan and Cao, Xiaochun and Tang, Jing},
-  journal={Advances in Neural Information Processing Systems},
-  volume={37},
-  pages={132364--132387},
-  year={2024}
+@inproceedings{
+luo2024fast,
+title={Fast Graph Sharpness-Aware Minimization for Enhancing and Accelerating Few-Shot Node Classification},
+author={Yihong Luo and Yuhan Chen and Siya Qiu and Yiwei Wang and Chen Zhang and Yan Zhou and Xiaochun Cao and Jing Tang},
+booktitle={The Thirty-eighth Annual Conference on Neural Information Processing Systems},
+year={2024},
+url={https://openreview.net/forum?id=AF32GbuupC}
 }
 ```
