@@ -19,27 +19,17 @@ def _load_module_from_dir(model_dir: str, module_name: str):
 	return module
 
 
-def build_objective(model_dir: str, dataset: str, cuda_idx: int, tune_keys):
+def build_objective(model_dir: str, dataset: str, cuda_idx: int, search_space, tune_keys):
 	train_mod = _load_module_from_dir(model_dir, 'train')
 	config_mod = _load_module_from_dir(model_dir, 'config')
 
 	def objective(trial: optuna.Trial) -> float:
 		cfg = config_mod.config_fs(dataset)
 
-		def should_tune(key: str) -> bool:
-			return (key in tune_keys) and (key in cfg)
-
-		# non-MAML grids use "lr" (not lr_meta/lr_finetune)
-		if should_tune('lr'):
-			cfg['lr'] = trial.suggest_categorical('lr', [0.01, 0.005, 0.003, 0.001])
-		if should_tune('wd'):
-			cfg['wd'] = trial.suggest_categorical('wd', [0.0, 0.001, 0.0005])
-		if should_tune('dropout'):
-			cfg['dropout'] = trial.suggest_categorical('dropout', [0.0, 0.1, 0.2, 0.3, 0.5])
-		if should_tune('rho'):
-			cfg['rho'] = trial.suggest_categorical('rho', [0.01, 0.05, 0.1, 0.15, 0.2, 0.5, 0.8, 1.0])
-		if should_tune('alpha'):
-			cfg['alpha'] = trial.suggest_categorical('alpha', [0.5, 0.7, 0.9])
+		# Suggest values from a single source of truth (search_space)
+		for key, values in search_space.items():
+			if key in cfg:
+				cfg[key] = trial.suggest_categorical(key, values)
 
 		# speed up
 		cfg['num_episodes'] = min(cfg.get('num_episodes', 1000), 400)
@@ -93,7 +83,7 @@ def main():
 	tune_keys = set(args.tune)
 	search_space = _build_grid_space(base_cfg, tune_keys)
 
-	objective = build_objective(args.model_dir, args.dataset, args.cuda, tune_keys)
+	objective = build_objective(args.model_dir, args.dataset, args.cuda, search_space, tune_keys)
 	sampler = GridSampler(search_space)
 	study = optuna.create_study(direction='maximize', sampler=sampler, study_name=f"nonmaml_{os.path.basename(args.model_dir)}_{args.dataset}")
 	study.optimize(objective)
