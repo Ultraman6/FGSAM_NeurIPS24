@@ -21,6 +21,7 @@ from torch_geometric.datasets import (
     Reddit, 
 )
 
+import memmap_utils as mmu
 
 ds_root = "../_data"
 
@@ -31,6 +32,9 @@ dataset_list = ["amazon-clothing", "amazon-electronics", "dblp"]
 def load_data(dataset_name:str, class_split:dict, root=None):
     if root == None:
         root = ds_root
+    # fast path: read-only memmap if available and requested
+    if os.getenv("USE_MEMMAP", "0") == "1" and mmu.available(root, dataset_name):
+        return mmu.load_memmap(root, dataset_name)
 
     if dataset_name in dataset_list:
         if dataset_name == 'ogbn-arxiv':

@@ -2,12 +2,13 @@ import argparse
 import importlib.util
 import os
 import sys
-
 import optuna
 from optuna.samplers import GridSampler
 import random
 import numpy as np
 import torch
+import importlib
+import memmap_utils as mmu
 
 
 def _load_module_from_dir(model_dir: str, module_name: str):
@@ -43,7 +44,7 @@ def set_seed(seed: int = 0) -> None:
 	torch.backends.cudnn.benchmark = False
 
 
-def build_objective(model_dir: str, dataset: str, cuda_idx: int, search_space, tune_keys, seed: int):
+def build_objective(model_dir: str, dataset: str, search_space, tune_keys, seed: int):
 	train_mod = _load_module_from_dir(model_dir, 'train')
 	config_mod = _load_module_from_dir(model_dir, 'config')
 
@@ -67,7 +68,7 @@ def build_objective(model_dir: str, dataset: str, cuda_idx: int, search_space, t
 		log_dir = os.path.join(model_dir, dataset, param_dir)
 		os.makedirs(log_dir, exist_ok=True)
 
-		result = train_mod.meta_learning_n_times(dataset, log_dir, cfg, cuda_idx=cuda_idx)
+		result = train_mod.meta_learning_n_times(dataset, log_dir, cfg, cuda_idx=0)
 
 		# Rename the latest json result to seed-named file inside the param directory
 		try:
@@ -98,10 +99,10 @@ def build_objective(model_dir: str, dataset: str, cuda_idx: int, search_space, t
 def _build_grid_space(base_cfg, tune_keys):
 	# Define non-MAML grids. Primary lr is "lr".
 	grids = {
-		'lr': [0.01, 0.005, 0.003, 0.001],
+		'lr': [0.05, 0.01, 0.001, 0.0001],
 		'wd': [0.0, 0.001, 0.0005],
-		'dropout': [0.0, 0.1, 0.2, 0.3, 0.5],
-		'rho': [0.01, 0.05, 0.1, 0.15, 0.2, 0.5, 0.8, 1.0],
+		'dropout': [0.0, 0.1, 0.3, 0.5, 0.7, 0.9],
+		'rho': [0.01, 0.05, 0.1, 0.15, 0.2, 0.5, 0.8, 1.0, 1.2],
 		'alpha': [0.5, 0.7, 0.9],
 	}
 	search_space = {k: v for k, v in grids.items() if (k in tune_keys) and (k in base_cfg)}
@@ -111,26 +112,110 @@ def _build_grid_space(base_cfg, tune_keys):
 def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--model_dir', type=str, required=True, help='Path like GPN, GPN+FGSAM, GPN+SAM, GPN+FGSAMp, GPN+SALP')
-	parser.add_argument('--dataset', type=str, default='corafull')
-	parser.add_argument('--cuda', type=int, default=0)
+	parser.add_argument('--dataset', type=str, nargs='+', default=['corafull'])
+	# removed: --cuda
 	parser.add_argument('--seed', type=int, default=0)
 	parser.add_argument('--tune', type=str, nargs='+', default=['lr','wd','dropout','rho','alpha'], help='Which config keys to grid search; only applied if present in config')
+	parser.add_argument('--use_ray', action='store_true')
+	# new parallelism controls
+	parser.add_argument('--num_parallels', type=int, default=2, help='Total parallel Ray trials across all GPUs')
+	parser.add_argument('--devices', type=str, nargs='+', default=['0'], help='CUDA device indices to use, e.g., 0 1')
+	parser.add_argument('--cpu_per_trial', type=int, default=2)
 	args = parser.parse_args()
 
 	# Set RNG seeds before running trials
 	set_seed(args.seed)
 
 	config_mod = _load_module_from_dir(args.model_dir, 'config')
-	base_cfg = config_mod.config_fs(args.dataset)
 	tune_keys = set(args.tune)
-	search_space = _build_grid_space(base_cfg, tune_keys)
+	for dataset in args.dataset:
+		base_cfg = config_mod.config_fs(dataset)
+		search_space = _build_grid_space(base_cfg, tune_keys)
 
-	objective = build_objective(args.model_dir, args.dataset, args.cuda, search_space, tune_keys, args.seed)
-	sampler = GridSampler(search_space)
-	study = optuna.create_study(direction='maximize', sampler=sampler, study_name=f"nonmaml_{os.path.basename(args.model_dir)}_{args.dataset}")
-	study.optimize(objective)
-	print('Best params:', study.best_params)
-	print('Best value:', study.best_value)
+		# Prebuild memmap if requested and not present
+		utils_mod = _load_module_from_dir(args.model_dir, 'utils')
+		root = getattr(utils_mod, 'ds_root', '../_data')
+		if os.getenv('USE_MEMMAP', '0') == '1' and not mmu.available(root, dataset):
+			os.environ['USE_MEMMAP'] = '0'
+			x, y, edge_index, cl_tr, cl_va, cl_te, cd_tr, cd_va, cd_te = utils_mod.load_data(dataset, base_cfg['class_split'], root=root)
+			mmu.save_memmap(root, dataset, x, y, edge_index, {
+				'class_list_train': cl_tr, 'class_list_val': cl_va, 'class_list_test': cl_te,
+				'class_dict_train': cd_tr, 'class_dict_val': cd_va, 'class_dict_test': cd_te,
+			})
+			os.environ['USE_MEMMAP'] = '1'
+
+		if args.use_ray:
+			# compute gpu allocation
+			visible_devices = ",".join(args.devices)
+			os.environ['CUDA_VISIBLE_DEVICES'] = visible_devices
+			num_gpus = max(1, len(args.devices))
+			# fraction = num_gpus / num_parallels
+			gpu_per_trial = float(num_gpus) / float(max(1, args.num_parallels))
+			# cap at 1.0
+			gpu_per_trial = float(min(1.0, gpu_per_trial))
+			# Lazy import ray only when needed
+			ray = importlib.import_module('ray')
+			tune = importlib.import_module('ray.tune')
+			if not ray.is_initialized():
+				ray.init(ignore_reinit_error=True)
+			# Convert grid to ray grid_search
+			ray_space = {k: tune.grid_search(v) for k, v in search_space.items()}
+
+			def trainable(cfg_ray):
+				try:
+					# Respect per-process memory fraction based on parallelism
+					per_fraction = min(0.95, gpu_per_trial)
+					torch.cuda.set_per_process_memory_fraction(per_fraction, device=0)
+				except Exception:
+					pass
+				train_mod = _load_module_from_dir(args.model_dir, 'train')
+				config_mod_inner = _load_module_from_dir(args.model_dir, 'config')
+				cfg = config_mod_inner.config_fs(dataset)
+				for key in search_space.keys():
+					if key in cfg:
+						cfg[key] = cfg_ray[key]
+				# speed up
+				cfg['num_episodes'] = min(cfg.get('num_episodes', 1000), 400)
+				cfg['num_repeats'] = 1
+				cfg['num_meta_val'] = min(cfg.get('num_meta_val', 20), 10)
+				cfg['num_meta_test'] = min(cfg.get('num_meta_test', 100), 30)
+				cfg['patience'] = min(cfg.get('patience', 10), 8)
+
+				param_dir = _params_dirname({k: cfg[k] for k in search_space.keys() if k in cfg})
+				log_dir = os.path.join(args.model_dir, dataset, param_dir)
+				os.makedirs(log_dir, exist_ok=True)
+
+				result = train_mod.meta_learning_n_times(dataset, log_dir, cfg, cuda_idx=0)
+				if isinstance(result, tuple):
+					if len(result) >= 3:
+						final_acc, val_acc, _ = result
+						score = float(val_acc) if val_acc is not None else float(final_acc)
+					else:
+						score = float(result[0])
+				else:
+					score = float(result)
+				from ray import tune as _t
+				_t.report(score=score)
+
+			analysis = tune.run(
+				trainable,
+				config=ray_space,
+				resources_per_trial={"cpu": int(args.cpu_per_trial), "gpu": float(gpu_per_trial)},
+				local_dir=os.path.join(args.model_dir, dataset, "ray_logs"),
+			)
+			best_cfg = analysis.get_best_config(metric='score', mode='max')
+			best_score = analysis.get_best_trial(metric='score', mode='max').last_result['score']
+			print(f'[{dataset}] Best params (Ray):', best_cfg)
+			print(f'[{dataset}] Best value (Ray):', best_score)
+		else:
+			# also respect devices in non-ray mode
+			os.environ['CUDA_VISIBLE_DEVICES'] = ",".join(args.devices)
+			objective = build_objective(args.model_dir, dataset, search_space, tune_keys, args.seed)
+			sampler = GridSampler(search_space)
+			study = optuna.create_study(direction='maximize', sampler=sampler, study_name=f"nonmaml_{os.path.basename(args.model_dir)}_{dataset}")
+			study.optimize(objective)
+			print(f'[{dataset}] Best params:', study.best_params)
+			print(f'[{dataset}] Best value:', study.best_value)
 
 
 if __name__ == '__main__':
