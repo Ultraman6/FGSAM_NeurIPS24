@@ -117,10 +117,11 @@ def main():
 	parser.add_argument('--seed', type=int, default=0)
 	parser.add_argument('--tune', type=str, nargs='+', default=['lr','wd','dropout','rho','alpha'], help='Which config keys to grid search; only applied if present in config')
 	parser.add_argument('--use_ray', action='store_true')
+	parser.add_argument('--use_memmap', action='store_true', help='Enable memmap data loading (equivalent to USE_MEMMAP=1)')
 	# new parallelism controls
 	parser.add_argument('--num_parallels', type=int, default=2, help='Total parallel Ray trials across all GPUs')
 	parser.add_argument('--devices', type=str, nargs='+', default=['0'], help='CUDA device indices to use, e.g., 0 1')
-	parser.add_argument('--cpu_per_trial', type=int, default=2)
+	# removed: cpu_per_trial; compute automatically
 	args = parser.parse_args()
 
 	# Set RNG seeds before running trials
@@ -135,13 +136,15 @@ def main():
 		# Prebuild memmap if requested and not present
 		utils_mod = _load_module_from_dir(args.model_dir, 'utils')
 		root = getattr(utils_mod, 'ds_root', '../_data')
-		if os.getenv('USE_MEMMAP', '0') == '1' and not mmu.available(root, dataset):
+		if (args.use_memmap or os.getenv('USE_MEMMAP', '0') == '1') and not mmu.available(root, dataset):
 			os.environ['USE_MEMMAP'] = '0'
 			x, y, edge_index, cl_tr, cl_va, cl_te, cd_tr, cd_va, cd_te = utils_mod.load_data(dataset, base_cfg['class_split'], root=root)
 			mmu.save_memmap(root, dataset, x, y, edge_index, {
 				'class_list_train': cl_tr, 'class_list_val': cl_va, 'class_list_test': cl_te,
 				'class_dict_train': cd_tr, 'class_dict_val': cd_va, 'class_dict_test': cd_te,
 			})
+			os.environ['USE_MEMMAP'] = '1'
+		elif args.use_memmap:
 			os.environ['USE_MEMMAP'] = '1'
 
 		if args.use_ray:
@@ -197,10 +200,11 @@ def main():
 				from ray import tune as _t
 				_t.report(score=score)
 
+			# auto-compute CPUs per trial: leave to Ray scheduler by not specifying, or set 1
 			analysis = tune.run(
 				trainable,
 				config=ray_space,
-				resources_per_trial={"cpu": int(args.cpu_per_trial), "gpu": float(gpu_per_trial)},
+				resources_per_trial={"gpu": float(gpu_per_trial)},
 				local_dir=os.path.join(args.model_dir, dataset, "ray_logs"),
 			)
 			best_cfg = analysis.get_best_config(metric='score', mode='max')
